@@ -1,10 +1,63 @@
+"""
+This is a Rust-inspired wrapper over subprocess.Popen
+
+It provides you with Command builder that can be customized via
+multiple method chaining.
+
+The Command type acts as a process builder,
+providing fine-grained control over how a new process should be spawned.
+
+A default configuration can be generated using Command(program),
+where program gives a path to the program or
+string with command and its options to run.
+
+Under hood this command is being split by shlex.split()
+Additional builder methods allow the configuration to be changed
+(for example, by adding arguments) prior to starting it.
+"""
 from os import environ, path
 from subprocess import Popen, DEVNULL, TimeoutExpired, PIPE
 from shlex import split as shell_split
-from collections import namedtuple
 
 
-Output = namedtuple('Output', 'status stdout stderr')
+class Output(object):
+    """ Represents Command's output.
+
+        Note:
+            Type of stdout/stderr is determined by command's mode.
+
+        Attributes:
+            return_code (int): Return code of Command.
+            stdout: Content of stdout. Either bytes or str
+            stderr: Content of stdout. Either bytes or str
+    """
+    def __init__(self, return_code, stdout, stderr):
+        self.return_code = return_code
+        self.stdout = stdout
+        self.stderr = stderr
+
+    def __repr__(self):
+        return "Output(code={}, stdout={}, stderr={})".format(
+                self.return_code,
+                self.stdout.__repr__(),
+                self.stderr.__repr__())
+
+    def __str__(self):
+        return self.__repr__()
+
+    def __bool__(self):
+        return self.is_success()
+
+    def __nonzero__(self):
+        return self.is_success()
+
+    def is_success(self):
+        """ Returns whether execution of Command has been successful.
+
+            Returns:
+                True If return code is zero, False otherwise.
+        """
+        return self.return_code == 0
 
 
 class Command(object):
@@ -14,7 +67,8 @@ class Command(object):
         Each method returns self except otherwise stated.
 
         Args:
-            command: String with command to run.
+            command (str): String with command to run.
+                           It is split by shlex.split()
     """
     def __init__(self, command):
         """ Initializer.
@@ -34,7 +88,7 @@ class Command(object):
         """ Adds argument to command.
 
             Args:
-                arg: String with argument.
+                arg (str): String with argument.
 
             Returns:
                 self
@@ -47,7 +101,7 @@ class Command(object):
         """ Adds multiple arguments.
 
             Args:
-                command: Iterable with arguments.
+                args (list): Iterable with arguments.
 
             Returns:
                 self
@@ -60,6 +114,9 @@ class Command(object):
         """ Sets binary mode to underlying Popen.
 
             It means that stdout/stderr/stdin are treated as binary streams
+
+            Returns:
+                self
         """
         self._universal_newlines = False
 
@@ -68,8 +125,8 @@ class Command(object):
     def shell(self):
         """ Enables shell mode.
 
-            Command will be passed as single string.
-            and shell=True will be passed to underlying Popen
+            Command with all arguments is passed as single string.
+            and shell=True will be set to underlying Popen
 
             Returns:
                 self
@@ -82,7 +139,7 @@ class Command(object):
         """ Sets cwd of command.
 
             Args:
-                cwd: Valid path to existing directory
+                cwd (str): Valid path to existing directory
 
             Returns:
                 self
@@ -96,8 +153,32 @@ class Command(object):
         self._cwd = cwd
         return self
 
+    def env_clear(self):
+        """ Clears all environment variables for command.
+
+            Returns:
+                self
+        """
+        self._env.clear()
+        return self
+
+    def env_remove(self, *args):
+        """ Remove environ variables from command's environment.
+
+           Args:
+               args: List of keys to remove. Should be str.
+
+           Returns:
+               self
+        """
+        for key in args:
+            if key in self._env:
+                del self._env[key]
+
+        return self
+
     def env(self, **kwargs):
-        """ Add environ variables to system environ.
+        """ Add environ variables command's environment.
 
            Args:
                kwargs: Variables to add to command's environment.
@@ -110,47 +191,65 @@ class Command(object):
 
     def all_pipe(self):
         """ Sets all streams redirection to subprocess.PIPE.
+
+            Returns:
+                self
         """
-        self.stderr_pipe()
-        self.stdout_pipe()
-        self.stdin_pipe()
-        return self
+        return self.stderr_pipe().stdout_pipe().stdin_pipe()
 
     def stderr_pipe(self):
         """ Sets stderr redirection to subprocess.PIPE.
+
+            Returns:
+                self
         """
         return self.stderr(PIPE)
 
     def stdout_pipe(self):
         """ Sets stdout redirection to subprocess.PIPE.
+
+            Returns:
+                self
         """
         return self.stdout(PIPE)
 
     def stdin_pipe(self):
         """ Sets stdin redirection to subprocess.PIPE.
+
+            Returns:
+                self
         """
         return self.stdin(PIPE)
 
     def all_null(self):
         """ Sets all streams redirection to NULL.
+
+            Returns:
+                self
         """
-        self.stderr_null()
-        self.stdout_null()
-        self.stdin_null()
-        return self
+        return self.stderr_null().stdout_null().stdin_null()
 
     def stderr_null(self):
         """ Sets stderr redirection to NULL.
+
+            Returns:
+                self
         """
         return self.stderr(DEVNULL)
 
     def stdout_null(self):
         """ Sets stdout redirection to NULL.
+
+            Returns:
+                self
         """
         return self.stdout(DEVNULL)
 
     def stdin_null(self):
         """ Sets stdin redirection to NULL.
+
+            Returns:
+                self
         """
         return self.stdin(DEVNULL)
 
@@ -224,8 +323,11 @@ class Command(object):
     def status(self, timeout=None):
         """ Waits for command to terminate and returns status code.
 
+            Note:
+                Upon termination underlying Popen is cleared.
+
             Args:
-                timeout: Timeout in seconds. Optional. Default None
+                timeout (int): Timeout in seconds. Optional. Default None
 
             Returns:
                 None: On timeout.
@@ -244,16 +346,28 @@ class Command(object):
         """ Waite for command to finish and collects its output.
 
             Args:
-                timeout: Timeout in seconds. Optional. Default None
+                timeout (int): Timeout in seconds. Optional. Default None
 
             Note:
-                In order to return stdout\stderr
-                you need to setup PIPE redirection.
+                Upon termination underlying Popen is cleared.
+
+            Note:
+                By default (i.e. redirection is not set)
+                stdin/stdout/stderr are captured.
 
             Returns:
                 None: On timeout.
                 Output: Named tuple with fields status, stdout and stderr.
         """
+        if self._stderr is None:
+            self.stderr_pipe()
+
+        if self._stdout is None:
+            self.stdout_pipe()
+
+        if self._stdin is None:
+            self.stdin_pipe()
+
         self.start()
         try:
             stdout, stderr = self._inner.communicate(timeout=timeout)
@@ -270,8 +384,6 @@ class Command(object):
                 None: Process is not terminated.
                 returncode: Return code of command from Popen.
 
-            Note:
-                Should be called after start.
         """
         if not self._inner:
             return None
@@ -282,7 +394,7 @@ class Command(object):
         """ Terminates command.
 
             Note:
-                Should be called after start.
+                Upon termination underlying Popen is cleared.
         """
         if self._inner:
             self._inner.terminate()
