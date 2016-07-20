@@ -19,12 +19,12 @@ class Command(object):
     def __init__(self, command):
         """ Initializer.
         """
-        self._args = shell_split(command)
+        self._args = shell_split(command, posix=False)
         self._env = environ.copy()
         self._stderr = None
         self._stdout = None
         self._stdin = None
-        self._shell = True
+        self._shell = False
         self._cwd = None
         self._universal_newlines = True
 
@@ -65,6 +65,19 @@ class Command(object):
 
         return self
 
+    def shell(self):
+        """ Enables shell mode.
+
+            Command will be passed as single string.
+            and shell=True will be passed to underlying Popen
+
+            Returns:
+                self
+        """
+        self._shell = True
+
+        return self
+
     def cwd(self, cwd):
         """ Sets cwd of command.
 
@@ -92,7 +105,7 @@ class Command(object):
            Returns:
                self
         """
-        self._env = dict(self._env, kwargs)
+        self._env = dict(self._env, **kwargs)
         return self
 
     def all_pipe(self):
@@ -192,7 +205,12 @@ class Command(object):
         if self._inner:
             return self
 
-        self._inner = Popen(self._args,
+        if self._shell:
+            cmd = " ".join(self._args)
+        else:
+            cmd = self._args
+
+        self._inner = Popen(cmd,
                             env=self._env,
                             shell=self._shell,
                             stdin=self._stdin,
@@ -239,8 +257,9 @@ class Command(object):
         self.start()
         try:
             stdout, stderr = self._inner.communicate(timeout=timeout)
+            result = Output(self._inner.returncode, stdout, stderr)
             self._inner = None
-            return Output(self._inner.returncode, stdout, stderr)
+            return result
         except TimeoutExpired:
             return None
 
