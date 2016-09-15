@@ -1,4 +1,4 @@
-command.py
+lazy-command.py
 ==============
 
 The Rust-like wrapper over `subprocess.PIPE`
@@ -10,7 +10,7 @@ Examples
 
 #### Collect all output of command
 ```python
-from command import Command
+from lazy_command import Command
 
 output = Command('make').arg(target).arg('-n').all_pipe().output()
 
@@ -21,7 +21,7 @@ print("return code={} | stdout={} | stderr={}".format(output.status,
 
 #### Just check status code
 ```python
-from command import Command
+from lazy_command import Command
 
 return_code = (Command('grep').arg('something')
                               .arg('-r')
@@ -37,7 +37,7 @@ print("grep returns {}".format(return_code))
 Under hood `Command` uses `shlex.split` so you can set the whole command in one go.
 
 ```python
-from command import Command
+from lazy_command import Command
 
 return_code = Command('grep something -r .').stdout_null().status()
 
